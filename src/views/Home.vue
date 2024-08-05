@@ -1,24 +1,16 @@
 <script setup>
-import { ref } from "vue";
-import axios from "axios";
+import { ref, getCurrentInstance, onMounted, reactive } from "vue";
+import * as echarts from "echarts";
+const { proxy } = getCurrentInstance();
+
 const getImageUrl = (user) => {
   return new URL(`../assets/images/${user}.png`, import.meta.url).href;
 };
 
-const tableData = ref([
-  {
-    name: "Java",
-    todayBuy: 100,
-    monthBuy: 200,
-    totalBuy: 300,
-  },
-  {
-    name: "Python",
-    todayBuy: 100,
-    monthBuy: 200,
-    totalBuy: 300,
-  },
-]);
+const tableData = ref([]);
+const countData = ref([]);
+const chartData = ref([]);
+const observer = ref([null]);
 
 const tableLabel = ref({
   name: "课程",
@@ -27,18 +19,134 @@ const tableLabel = ref({
   totalBuy: "总购买",
 });
 
-axios({
-  url: "/api/home/getTableData",
-  method: "get",
-}).then((res) => {
-  console.log(res);
-  //要学会制造假数据, 把交互的请求流程，根据接口文档泡桐，还要制造出数据
-  //有没有一种工具 拦截住请求 把我们制造的数据 根据接口文档来的 mock.js
+//这个是折线图和柱状图 两个图表共用的公共配置
+const xOptions = reactive({
+  // 图例文字颜色
+  textStyle: {
+    color: "#333",
+  },
+  legend: {},
+  grid: {
+    left: "20%",
+  },
+  // 提示框
+  tooltip: {
+    trigger: "axis",
+  },
+  xAxis: {
+    type: "category", // 类目轴
+    data: [],
+    axisLine: {
+      lineStyle: {
+        color: "#17b3a3",
+      },
+    },
+    axisLabel: {
+      interval: 0,
+      color: "#333",
+    },
+  },
+  yAxis: [
+    {
+      type: "value",
+      axisLine: {
+        lineStyle: {
+          color: "#17b3a3",
+        },
+      },
+    },
+  ],
+  color: ["#2ec7c9", "#b6a2de", "#5ab1ef", "#ffb980", "#d87a80", "#8d98b3"],
+  series: [],
+});
 
-  if (res.data.code === 200) {
-    console.log(res.data.data.tableData);
-    tableData.value = res.data.data.tableData;
+const pieOptions = reactive({
+  tooltip: {
+    trigger: "item",
+  },
+  legend: {},
+  color: [
+    "#0f78f4",
+    "#dd536b",
+    "#9462e5",
+    "#a6a6a6",
+    "#e1bb22",
+    "#39c362",
+    "#3ed1cf",
+  ],
+  series: [],
+});
+
+const getTableData = async () => {
+  const data = await proxy.$api.getTableData();
+  tableData.value = data.tableData;
+};
+
+const getCountData = async () => {
+  const data = await proxy.$api.getCountData();
+  countData.value = data;
+  //console.log(data);
+};
+
+const getChartData = async () => {
+  const { orderData, userData, videoData } = await proxy.$api.getChartData();
+  // 对第一个图标进行x轴 和  series赋值
+  xOptions.xAxis.data = orderData.date;
+  xOptions.series = Object.keys(orderData.data[0]).map((val) => {
+    return {
+      name: val,
+      data: orderData.data.map((item) => item[val]),
+      type: "line",
+    };
+  });
+  const oneEchart = echarts.init(proxy.$refs[`echart`]);
+  oneEchart.setOption(xOptions);
+
+  // 对第二个表格进行渲染
+  xOptions.xAxis.data = userData.map((item) => item.date);
+  xOptions.series = [
+    {
+      name: "新增用户",
+      data: userData.map((item) => item.new),
+      type: "bar",
+    },
+    {
+      name: "活跃用户",
+      data: userData.map((item) => item.active),
+      type: "bar",
+    },
+  ];
+  const twoEchart = echarts.init(proxy.$refs[`userEchart`]);
+  twoEchart.setOption(xOptions);
+
+  // 对饼状图进行渲染
+  pieOptions.series = [
+    {
+      data: videoData,
+      type: "pie",
+    },
+  ];
+  const threeEchart = echarts.init(proxy.$refs[`videoEchart`]);
+  threeEchart.setOption(pieOptions);
+
+  // 监听页面变化
+  // 如果监听的容器大小发生变化 改变了以后 会执行回调函数
+  observer.value = new ResizeObserver((en) => {
+    oneEchart.resize();
+    twoEchart.resize();
+    threeEchart.resize();
+  });
+
+  // 检测容器存在
+  if (proxy.$refs["echart"]) {
+    observer.value.observe(proxy.$refs["echart"]);
   }
+};
+
+onMounted(() => {
+  getTableData();
+  getCountData();
+  getChartData();
 });
 </script>
 
@@ -69,6 +177,38 @@ axios({
           ></el-table-column>
         </el-table>
       </el-card>
+    </el-col>
+    <el-col :span="16" style="margin-top: 20px">
+      <div class="num">
+        <el-card
+          :body-style="{ display: 'flex', padding: 0 }"
+          v-for="item in countData"
+          :key="item.name"
+        >
+          <component
+            :is="item.icon"
+            class="icons"
+            :style="{ background: item.color }"
+          ></component>
+          <div class="detail">
+            <p clas="num">¥{{ item.value }}</p>
+            <p clas="txt">¥{{ item.name }}</p>
+          </div>
+        </el-card>
+      </div>
+
+      <el-card class="top-echart">
+        <div ref="echart" style="height: 240px"></div>
+      </el-card>
+
+      <div class="graph">
+        <el-card>
+          <div ref="userEchart" style="height: 240px"></div>
+        </el-card>
+        <el-card>
+          <div ref="videoEchart" style="height: 240px"></div>
+        </el-card>
+      </div>
     </el-col>
   </el-row>
 </template>
@@ -119,7 +259,49 @@ axios({
   }
 
   .user-table {
-    margin-top:15px;
+    margin-top:20px;
+  }
+
+  .num{
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:space-between;
+    .el-card{
+      width:32%;
+      margin-bottom:20px;
+    }
+    .icons{
+      width:80px;
+      height:80px;
+      font-size:30px;
+      text-align:center;
+      line-height:80px;
+      color:#fff;
+    }
+    .detail{
+      margin-left:15px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      .num{
+        font-size:30px;
+        margin-bottom:10px;
+      }
+      .txt{
+        font-size:15px;
+        text-align:center;
+        color:#999;
+      }
+    }
+  }
+  .graph{
+    margin-top:20px;
+    display:flex;
+    justify-content:space-between;
+    .el-card{
+      width:48%;
+      height:260px;
+    }
   }
 }
 </style>
